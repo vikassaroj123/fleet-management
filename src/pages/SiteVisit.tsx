@@ -19,6 +19,7 @@ import {
   DialogContent,
   DialogHeader,
   DialogTitle,
+  DialogDescription,
 } from '@/components/ui/dialog';
 import { Search, Plus, MapPin, Calendar, User, Camera, FileText, Printer, Download, Eye, Truck } from 'lucide-react';
 import { format } from 'date-fns';
@@ -90,7 +91,7 @@ export default function SiteVisit() {
   const [subBranch, setSubBranch] = useState('');
   const [visitType, setVisitType] = useState<'Inspection' | 'Maintenance' | 'Delivery' | 'Installation' | 'Other'>('Inspection');
   const [visitedBy, setVisitedBy] = useState('');
-  const [vehicleId, setVehicleId] = useState('');
+  const [vehicleId, setVehicleId] = useState('none');
   const [purpose, setPurpose] = useState('');
   const [findings, setFindings] = useState('');
   const [recommendations, setRecommendations] = useState('');
@@ -161,8 +162,8 @@ export default function SiteVisit() {
       return;
     }
 
-    // Handle vehicle selection (empty string means no vehicle)
-    const vehicle = vehicleId && vehicleId !== '' && vehicles ? vehicles.find(v => v.id === vehicleId) : undefined;
+    // Handle vehicle selection (empty string or "none" means no vehicle)
+    const vehicle = vehicleId && vehicleId !== '' && vehicleId !== 'none' && vehicles ? vehicles.find(v => v.id === vehicleId) : undefined;
 
     const newVisit: SiteVisit = {
       id: `SV${String(siteVisits.length + 1).padStart(3, '0')}`,
@@ -208,7 +209,7 @@ export default function SiteVisit() {
     setSubBranch('');
     setVisitType('Inspection');
     setVisitedBy('');
-    setVehicleId('');
+    setVehicleId('none');
     setPurpose('');
     setFindings('');
     setRecommendations('');
@@ -296,10 +297,13 @@ export default function SiteVisit() {
               <Download className="w-4 h-4 mr-2" />
               Export
             </Button>
-            <Button onClick={() => {
-              resetForm();
-              setShowAddModal(true);
-            }}>
+            <Button 
+              type="button"
+              onClick={() => {
+                resetForm();
+                setShowAddModal(true);
+              }}
+            >
               <Plus className="w-4 h-4 mr-2" />
               Schedule Visit
             </Button>
@@ -416,15 +420,31 @@ export default function SiteVisit() {
       </div>
 
       {/* Add Visit Modal */}
-      <Dialog open={showAddModal} onOpenChange={(open) => {
-        setShowAddModal(open);
-        if (!open) resetForm();
-      }}>
+      <Dialog 
+        open={showAddModal} 
+        onOpenChange={(open) => {
+          setShowAddModal(open);
+          if (!open) {
+            resetForm();
+          }
+        }}
+      >
         <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>Schedule Site Visit</DialogTitle>
+            <DialogDescription>
+              Fill in the details to schedule a new site visit
+            </DialogDescription>
           </DialogHeader>
-          <form onSubmit={handleAddVisit} className="space-y-4 py-4">
+          
+          <div className="space-y-4 py-4">
+            <form 
+              onSubmit={(e) => {
+                e.preventDefault();
+                handleAddVisit(e);
+              }} 
+              className="space-y-4"
+            >
             <div className="grid grid-cols-2 gap-4">
               <div>
                 <Label>Visit Date *</Label>
@@ -490,92 +510,93 @@ export default function SiteVisit() {
                         <SelectItem key={w.id} value={w.id}>{w.name} - {w.role}</SelectItem>
                       ))
                     ) : (
-                      <SelectItem value="" disabled>No workers available</SelectItem>
+                      <SelectItem value="no-workers" disabled>No workers available</SelectItem>
                     )}
                   </SelectContent>
                 </Select>
               </div>
               <div>
                 <Label>Vehicle (Optional)</Label>
-                <Select value={vehicleId || ""} onValueChange={(value) => setVehicleId(value === "" ? "" : value)}>
+                <Select value={vehicleId} onValueChange={setVehicleId}>
                   <SelectTrigger>
                     <SelectValue placeholder="Select Vehicle (Optional)" />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="">None</SelectItem>
+                    <SelectItem value="none">None</SelectItem>
                     {vehicles && vehicles.length > 0 ? (
                       vehicles.map(v => (
                         <SelectItem key={v.id} value={v.id}>{v.vehicleNumber} - {v.model}</SelectItem>
                       ))
                     ) : (
-                      <SelectItem value="" disabled>No vehicles available</SelectItem>
+                      <SelectItem value="no-vehicles" disabled>No vehicles available</SelectItem>
                     )}
                   </SelectContent>
                 </Select>
-                {vehicleId && vehicleId !== "" && (() => {
-                  const selectedVehicle = vehicles?.find(v => v.id === vehicleId);
-                  return selectedVehicle ? (
-                    <div className="mt-3 bg-muted/50 rounded-lg p-4 border border-border">
-                      <h4 className="font-semibold mb-3 flex items-center gap-2">
-                        <Truck className="w-4 h-4" />
-                        Vehicle Details
-                      </h4>
-                      <div className="grid grid-cols-2 gap-3 text-sm">
-                        <div>
-                          <span className="text-muted-foreground">Vehicle Number:</span>
-                          <p className="font-medium">{selectedVehicle.vehicleNumber}</p>
-                        </div>
-                        <div>
-                          <span className="text-muted-foreground">Model:</span>
-                          <p className="font-medium">{selectedVehicle.model}</p>
-                        </div>
-                        <div>
-                          <span className="text-muted-foreground">Type:</span>
-                          <p className="font-medium">{selectedVehicle.type}</p>
-                        </div>
-                        <div>
-                          <span className="text-muted-foreground">Status:</span>
-                          <StatusBadge 
-                            status={selectedVehicle.status} 
-                            variant={
-                              selectedVehicle.status === 'Active' ? 'success' :
-                              selectedVehicle.status === 'In Service' ? 'warning' : 'danger'
-                            }
-                          />
-                        </div>
-                        <div>
-                          <span className="text-muted-foreground">Current KM:</span>
-                          <p className="font-medium">{selectedVehicle.currentKM.toLocaleString()}</p>
-                        </div>
-                        <div>
-                          <span className="text-muted-foreground">Total Hours:</span>
-                          <p className="font-medium">{selectedVehicle.totalHours.toLocaleString()}</p>
-                        </div>
-                        <div>
-                          <span className="text-muted-foreground">Branch:</span>
-                          <p className="font-medium">{selectedVehicle.branch}</p>
-                        </div>
-                        <div>
-                          <span className="text-muted-foreground">Sub Branch:</span>
-                          <p className="font-medium">{selectedVehicle.subBranch}</p>
-                        </div>
-                        {selectedVehicle.driverId && (
-                          <div className="col-span-2">
-                            <span className="text-muted-foreground">Driver:</span>
-                            <p className="font-medium">
-                              {drivers?.find(d => d.id === selectedVehicle.driverId)?.name || 'N/A'}
-                            </p>
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                  ) : null;
-                })()}
               </div>
               <div>
                 <Label>Next Follow Up</Label>
                 <Input type="date" value={nextFollowUp} onChange={(e) => setNextFollowUp(e.target.value)} />
               </div>
+              {/* Vehicle Details Panel */}
+              {vehicleId && vehicleId !== "" && vehicleId !== "none" && (() => {
+                const selectedVehicle = vehicles?.find(v => v.id === vehicleId);
+                if (!selectedVehicle) return null;
+                const driver = drivers?.find(d => d.id === selectedVehicle.driverId);
+                return (
+                  <div key={`vehicle-details-${vehicleId}`} className="col-span-2 bg-muted/50 rounded-lg p-4 border border-border mt-2">
+                    <h4 className="font-semibold mb-3 flex items-center gap-2">
+                      <Truck className="w-4 h-4" />
+                      Vehicle Details
+                    </h4>
+                    <div className="grid grid-cols-2 gap-3 text-sm">
+                      <div>
+                        <span className="text-muted-foreground">Vehicle Number:</span>
+                        <p className="font-medium">{selectedVehicle.vehicleNumber}</p>
+                      </div>
+                      <div>
+                        <span className="text-muted-foreground">Model:</span>
+                        <p className="font-medium">{selectedVehicle.model}</p>
+                      </div>
+                      <div>
+                        <span className="text-muted-foreground">Type:</span>
+                        <p className="font-medium">{selectedVehicle.type}</p>
+                      </div>
+                      <div>
+                        <span className="text-muted-foreground">Status:</span>
+                        <StatusBadge 
+                          status={selectedVehicle.status} 
+                          variant={
+                            selectedVehicle.status === 'Active' ? 'success' :
+                            selectedVehicle.status === 'In Service' ? 'warning' : 'danger'
+                          }
+                        />
+                      </div>
+                      <div>
+                        <span className="text-muted-foreground">Current KM:</span>
+                        <p className="font-medium">{selectedVehicle.currentKM.toLocaleString()}</p>
+                      </div>
+                      <div>
+                        <span className="text-muted-foreground">Total Hours:</span>
+                        <p className="font-medium">{selectedVehicle.totalHours.toLocaleString()}</p>
+                      </div>
+                      <div>
+                        <span className="text-muted-foreground">Branch:</span>
+                        <p className="font-medium">{selectedVehicle.branch}</p>
+                      </div>
+                      <div>
+                        <span className="text-muted-foreground">Sub Branch:</span>
+                        <p className="font-medium">{selectedVehicle.subBranch}</p>
+                      </div>
+                      {driver && (
+                        <div className="col-span-2">
+                          <span className="text-muted-foreground">Driver:</span>
+                          <p className="font-medium">{driver.name}</p>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                );
+              })()}
               <div className="col-span-2">
                 <Label>Purpose *</Label>
                 <Textarea value={purpose} onChange={(e) => setPurpose(e.target.value)} rows={3} />
@@ -600,18 +621,13 @@ export default function SiteVisit() {
               >
                 Cancel
               </Button>
-              <Button 
-                type="submit"
-                onClick={(e) => {
-                  e.preventDefault();
-                  handleAddVisit(e);
-                }}
-              >
+              <Button type="submit">
                 <Plus className="w-4 h-4 mr-2" />
                 Schedule Visit
               </Button>
             </div>
-          </form>
+            </form>
+          </div>
         </DialogContent>
       </Dialog>
 
