@@ -19,7 +19,7 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 import { Label } from '@/components/ui/label';
-import { Search, Plus, Printer, Download, Edit, Eye, UserCheck, History, Users, TrendingUp, AlertCircle, Wrench, ClipboardList, Calendar, Clock } from 'lucide-react';
+import { Search, Plus, Printer, Download, Edit, Eye, UserCheck, History, Users, TrendingUp, AlertCircle, Wrench, ClipboardList, Calendar, Clock, AlertTriangle } from 'lucide-react';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { format } from 'date-fns';
 import { toast } from 'sonner';
@@ -41,7 +41,7 @@ interface DriverAssignmentHistory {
 }
 
 export default function Vehicle() {
-  const { vehicles, drivers, updateVehicle, getVehicleServiceHistory, jobCards, serviceHistory, driverAssignmentHistory } = useFleet();
+  const { vehicles, drivers, updateVehicle, getVehicleServiceHistory, jobCards, serviceHistory, driverAssignmentHistory, scheduledServices } = useFleet();
   
   const [searchTerm, setSearchTerm] = useState('');
   const [filterBranch, setFilterBranch] = useState('');
@@ -581,6 +581,12 @@ export default function Vehicle() {
               .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
             const vehicleDriverHistory = driverAssignmentHistory.filter(dah => dah.vehicleId === selectedVehicle.id)
               .sort((a, b) => new Date(b.assignedAt).getTime() - new Date(a.assignedAt).getTime());
+            const vehicleScheduledServices = scheduledServices.filter(ss => ss.vehicleId === selectedVehicle.id)
+              .sort((a, b) => {
+                // Sort by status: Due first, then Upcoming, then Completed
+                const statusOrder = { 'Due': 0, 'Upcoming': 1, 'Completed': 2 };
+                return (statusOrder[a.status] || 3) - (statusOrder[b.status] || 3);
+              });
             
             return (
               <div className="space-y-6">
@@ -662,10 +668,14 @@ export default function Vehicle() {
 
                 {/* History Tabs */}
                 <Tabs defaultValue="services" className="w-full">
-                  <TabsList className="grid w-full grid-cols-4">
+                  <TabsList className="grid w-full grid-cols-5">
                     <TabsTrigger value="services">
                       <Wrench className="w-4 h-4 mr-2" />
                       Services ({vehicleServiceHistory.length})
+                    </TabsTrigger>
+                    <TabsTrigger value="scheduled">
+                      <Calendar className="w-4 h-4 mr-2" />
+                      Scheduled ({vehicleScheduledServices.length})
                     </TabsTrigger>
                     <TabsTrigger value="jobcards">
                       <ClipboardList className="w-4 h-4 mr-2" />
@@ -724,6 +734,82 @@ export default function Vehicle() {
                               <div className="mt-2 text-sm">
                                 <span className="text-muted-foreground">Job Card: </span>
                                 <span className="font-medium">{service.jobCardId}</span>
+                              </div>
+                            )}
+                          </div>
+                        ))
+                      )}
+                    </div>
+                  </TabsContent>
+
+                  {/* Scheduled Services */}
+                  <TabsContent value="scheduled" className="space-y-4 mt-4">
+                    <div className="space-y-3">
+                      {vehicleScheduledServices.length === 0 ? (
+                        <div className="text-center py-8 text-muted-foreground">
+                          <Calendar className="w-12 h-12 mx-auto mb-4 opacity-50" />
+                          <p>No scheduled services found</p>
+                        </div>
+                      ) : (
+                        vehicleScheduledServices.map((scheduled) => (
+                          <div key={scheduled.id} className="border border-border rounded-lg p-4">
+                            <div className="flex items-start justify-between mb-2">
+                              <div>
+                                <p className="font-semibold">{scheduled.serviceType}</p>
+                                <p className="text-sm text-muted-foreground">
+                                  Trigger: {scheduled.triggerType}
+                                  {scheduled.triggerType === 'KM' && typeof scheduled.triggerValue === 'number' && (
+                                    ` • Every ${scheduled.triggerValue.toLocaleString()} KM`
+                                  )}
+                                  {scheduled.triggerType === 'Hours' && typeof scheduled.triggerValue === 'number' && (
+                                    ` • Every ${scheduled.triggerValue} Hours`
+                                  )}
+                                </p>
+                              </div>
+                              <StatusBadge 
+                                status={scheduled.status} 
+                                variant={
+                                  scheduled.status === 'Due' ? 'danger' :
+                                  scheduled.status === 'Upcoming' ? 'warning' : 'success'
+                                }
+                              />
+                            </div>
+                            <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mt-3 text-sm">
+                              {scheduled.lastServiceDate && (
+                                <div>
+                                  <span className="text-muted-foreground">Last Service:</span>
+                                  <p className="font-medium">
+                                    {format(new Date(scheduled.lastServiceDate), 'MMM dd, yyyy')}
+                                  </p>
+                                </div>
+                              )}
+                              {scheduled.lastServiceKM && (
+                                <div>
+                                  <span className="text-muted-foreground">Last Service KM:</span>
+                                  <p className="font-medium">{scheduled.lastServiceKM.toLocaleString()}</p>
+                                </div>
+                              )}
+                              {scheduled.nextDueKM && (
+                                <div>
+                                  <span className="text-muted-foreground">Next Due KM:</span>
+                                  <p className="font-medium">{scheduled.nextDueKM.toLocaleString()}</p>
+                                </div>
+                              )}
+                              {scheduled.nextDueDate && (
+                                <div>
+                                  <span className="text-muted-foreground">Next Due Date:</span>
+                                  <p className="font-medium">
+                                    {format(new Date(scheduled.nextDueDate), 'MMM dd, yyyy')}
+                                  </p>
+                                </div>
+                              )}
+                            </div>
+                            {scheduled.status === 'Due' && (
+                              <div className="mt-3 bg-destructive/10 border border-destructive/20 rounded-lg p-2">
+                                <p className="text-sm text-destructive font-medium">
+                                  <AlertCircle className="w-4 h-4 inline mr-1" />
+                                  This service is due and requires immediate attention
+                                </p>
                               </div>
                             )}
                           </div>
@@ -862,6 +948,13 @@ export default function Vehicle() {
                       <div className="bg-card border border-border rounded-lg p-4">
                         <p className="text-sm text-muted-foreground">Total Services</p>
                         <p className="text-2xl font-bold">{vehicleServiceHistory.length}</p>
+                      </div>
+                      <div className="bg-card border border-border rounded-lg p-4">
+                        <p className="text-sm text-muted-foreground">Scheduled Services</p>
+                        <p className="text-2xl font-bold">{vehicleScheduledServices.length}</p>
+                        <p className="text-xs text-muted-foreground mt-1">
+                          {vehicleScheduledServices.filter(s => s.status === 'Due').length} Due
+                        </p>
                       </div>
                       <div className="bg-card border border-border rounded-lg p-4">
                         <p className="text-sm text-muted-foreground">Total Job Cards</p>

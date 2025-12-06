@@ -21,7 +21,8 @@ import {
   DialogTitle,
   DialogDescription,
 } from '@/components/ui/dialog';
-import { Search, Plus, MapPin, Calendar, User, Camera, FileText, Printer, Download, Eye, Truck } from 'lucide-react';
+import { Search, Plus, MapPin, Calendar, User, Camera, FileText, Printer, Download, Eye, Truck, Wrench, ClipboardList, AlertCircle } from 'lucide-react';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { format } from 'date-fns';
 import { toast } from 'sonner';
 import { exportToExcel, printPage } from '@/lib/exportUtils';
@@ -56,7 +57,7 @@ const initialSiteVisits: SiteVisit[] = [
 ];
 
 export default function SiteVisit() {
-  const { vehicles, workers, drivers } = useFleet();
+  const { vehicles, workers, drivers, getVehicleServiceHistory, scheduledServices, jobCards, driverAssignmentHistory } = useFleet();
   
   // Safety check
   if (!vehicles || !Array.isArray(vehicles) || !workers || !Array.isArray(workers)) {
@@ -633,87 +634,553 @@ export default function SiteVisit() {
 
       {/* Details Modal */}
       <Dialog open={showDetailsModal} onOpenChange={setShowDetailsModal}>
-        <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto">
+        <DialogContent className="max-w-5xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
-            <DialogTitle>Site Visit Details</DialogTitle>
+            <DialogTitle>Site Visit Details & Vehicle History</DialogTitle>
           </DialogHeader>
-          {selectedVisit && (
-            <div className="space-y-4">
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <Label className="text-muted-foreground">Visit ID</Label>
-                  <p className="font-medium">{selectedVisit.id}</p>
-                </div>
-                <div>
-                  <Label className="text-muted-foreground">Status</Label>
-                  <StatusBadge 
-                    status={selectedVisit.status} 
-                    variant={
-                      selectedVisit.status === 'Completed' ? 'success' :
-                      selectedVisit.status === 'In Progress' ? 'warning' :
-                      selectedVisit.status === 'Cancelled' ? 'danger' : 'info'
-                    }
-                  />
-                </div>
-                <div>
-                  <Label className="text-muted-foreground">Visit Date</Label>
-                  <p className="font-medium">{format(new Date(selectedVisit.visitDate), 'MMM dd, yyyy')}</p>
-                </div>
-                <div>
-                  <Label className="text-muted-foreground">Visit Time</Label>
-                  <p className="font-medium">{selectedVisit.visitTime}</p>
-                </div>
-                <div className="col-span-2">
-                  <Label className="text-muted-foreground">Site Name</Label>
-                  <p className="font-medium">{selectedVisit.siteName}</p>
-                </div>
-                <div className="col-span-2">
-                  <Label className="text-muted-foreground">Site Location</Label>
-                  <p className="font-medium">{selectedVisit.siteLocation}</p>
-                </div>
-                <div>
-                  <Label className="text-muted-foreground">Branch</Label>
-                  <p className="font-medium">{selectedVisit.branch}</p>
-                </div>
-                <div>
-                  <Label className="text-muted-foreground">Sub Branch</Label>
-                  <p className="font-medium">{selectedVisit.subBranch}</p>
-                </div>
-                <div>
-                  <Label className="text-muted-foreground">Visit Type</Label>
-                  <p className="font-medium">{selectedVisit.visitType}</p>
-                </div>
-                <div>
-                  <Label className="text-muted-foreground">Visited By</Label>
-                  <p className="font-medium">{selectedVisit.visitedBy}</p>
-                </div>
-                <div>
-                  <Label className="text-muted-foreground">Vehicle</Label>
-                  <p className="font-medium">{selectedVisit.vehicleNumber || 'N/A'}</p>
-                </div>
-                <div>
-                  <Label className="text-muted-foreground">Next Follow Up</Label>
-                  <p className="font-medium">{selectedVisit.nextFollowUp ? format(new Date(selectedVisit.nextFollowUp), 'MMM dd, yyyy') : 'N/A'}</p>
-                </div>
-                <div className="col-span-2">
-                  <Label className="text-muted-foreground">Purpose</Label>
-                  <p className="font-medium">{selectedVisit.purpose}</p>
-                </div>
-                {selectedVisit.findings && (
-                  <div className="col-span-2">
-                    <Label className="text-muted-foreground">Findings</Label>
-                    <p className="font-medium whitespace-pre-line">{selectedVisit.findings}</p>
+          {selectedVisit && (() => {
+            // Get vehicle service history if vehicle is associated
+            const vehicle = selectedVisit.vehicleId ? vehicles?.find(v => v.id === selectedVisit.vehicleId) : null;
+            const vehicleServiceHistory = vehicle ? getVehicleServiceHistory(vehicle.id) : [];
+            const vehicleScheduledServices = vehicle ? scheduledServices.filter(ss => ss.vehicleId === vehicle.id)
+              .sort((a, b) => {
+                const statusOrder = { 'Due': 0, 'Upcoming': 1, 'Completed': 2 };
+                return (statusOrder[a.status] || 3) - (statusOrder[b.status] || 3);
+              }) : [];
+            const vehicleJobCards = vehicle ? jobCards.filter(jc => jc.vehicleId === vehicle.id)
+              .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()) : [];
+            const vehicleDriverHistory = vehicle ? driverAssignmentHistory.filter(dah => dah.vehicleId === vehicle.id)
+              .sort((a, b) => new Date(b.assignedAt).getTime() - new Date(a.assignedAt).getTime()) : [];
+            const currentDriver = vehicle ? drivers?.find(d => d.id === vehicle.driverId) : null;
+            
+            // Helper to get driver at service time
+            const getDriverAtServiceTime = (vehicleId: string, serviceDate: string) => {
+              const assignments = driverAssignmentHistory
+                .filter(dah => dah.vehicleId === vehicleId)
+                .sort((a, b) => new Date(b.assignedAt).getTime() - new Date(a.assignedAt).getTime());
+              
+              const serviceDateTime = new Date(serviceDate);
+              
+              for (const assignment of assignments) {
+                const assignedAt = new Date(assignment.assignedAt);
+                const unassignedAt = assignment.unassignedAt ? new Date(assignment.unassignedAt) : new Date();
+                
+                if (serviceDateTime >= assignedAt && serviceDateTime <= unassignedAt) {
+                  return drivers?.find(d => d.id === assignment.driverId);
+                }
+              }
+              
+              return currentDriver;
+            };
+            
+            // Calculate time between services
+            const getTimeBetweenServices = (currentServiceDate: string, previousServiceDate?: string) => {
+              if (!previousServiceDate) return null;
+              
+              const current = new Date(currentServiceDate);
+              const previous = new Date(previousServiceDate);
+              const diffTime = Math.abs(current.getTime() - previous.getTime());
+              const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+              
+              if (diffDays < 30) {
+                return `${diffDays} days`;
+              } else if (diffDays < 365) {
+                const months = Math.floor(diffDays / 30);
+                const days = diffDays % 30;
+                return days > 0 ? `${months} months ${days} days` : `${months} months`;
+              } else {
+                const years = Math.floor(diffDays / 365);
+                const months = Math.floor((diffDays % 365) / 30);
+                return months > 0 ? `${years} years ${months} months` : `${years} years`;
+              }
+            };
+            
+            return (
+              <div className="space-y-6">
+                {/* Site Visit Info */}
+                <div className="bg-muted/50 rounded-lg p-4">
+                  <h3 className="font-semibold mb-4">Site Visit Information</h3>
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <Label className="text-muted-foreground">Visit ID</Label>
+                      <p className="font-medium">{selectedVisit.id}</p>
+                    </div>
+                    <div>
+                      <Label className="text-muted-foreground">Status</Label>
+                      <StatusBadge 
+                        status={selectedVisit.status} 
+                        variant={
+                          selectedVisit.status === 'Completed' ? 'success' :
+                          selectedVisit.status === 'In Progress' ? 'warning' :
+                          selectedVisit.status === 'Cancelled' ? 'danger' : 'info'
+                        }
+                      />
+                    </div>
+                    <div>
+                      <Label className="text-muted-foreground">Visit Date</Label>
+                      <p className="font-medium">{format(new Date(selectedVisit.visitDate), 'MMM dd, yyyy')}</p>
+                    </div>
+                    <div>
+                      <Label className="text-muted-foreground">Visit Time</Label>
+                      <p className="font-medium">{selectedVisit.visitTime}</p>
+                    </div>
+                    <div className="col-span-2">
+                      <Label className="text-muted-foreground">Site Name</Label>
+                      <p className="font-medium">{selectedVisit.siteName}</p>
+                    </div>
+                    <div className="col-span-2">
+                      <Label className="text-muted-foreground">Site Location</Label>
+                      <p className="font-medium">{selectedVisit.siteLocation}</p>
+                    </div>
+                    <div>
+                      <Label className="text-muted-foreground">Branch</Label>
+                      <p className="font-medium">{selectedVisit.branch}</p>
+                    </div>
+                    <div>
+                      <Label className="text-muted-foreground">Sub Branch</Label>
+                      <p className="font-medium">{selectedVisit.subBranch}</p>
+                    </div>
+                    <div>
+                      <Label className="text-muted-foreground">Visit Type</Label>
+                      <p className="font-medium">{selectedVisit.visitType}</p>
+                    </div>
+                    <div>
+                      <Label className="text-muted-foreground">Visited By</Label>
+                      <p className="font-medium">{selectedVisit.visitedBy}</p>
+                    </div>
+                    <div>
+                      <Label className="text-muted-foreground">Vehicle</Label>
+                      <p className="font-medium">{selectedVisit.vehicleNumber || 'N/A'}</p>
+                    </div>
+                    <div>
+                      <Label className="text-muted-foreground">Next Follow Up</Label>
+                      <p className="font-medium">{selectedVisit.nextFollowUp ? format(new Date(selectedVisit.nextFollowUp), 'MMM dd, yyyy') : 'N/A'}</p>
+                    </div>
+                    <div className="col-span-2">
+                      <Label className="text-muted-foreground">Purpose</Label>
+                      <p className="font-medium">{selectedVisit.purpose}</p>
+                    </div>
+                    {selectedVisit.findings && (
+                      <div className="col-span-2">
+                        <Label className="text-muted-foreground">Findings</Label>
+                        <p className="font-medium whitespace-pre-line">{selectedVisit.findings}</p>
+                      </div>
+                    )}
+                    {selectedVisit.recommendations && (
+                      <div className="col-span-2">
+                        <Label className="text-muted-foreground">Recommendations</Label>
+                        <p className="font-medium whitespace-pre-line">{selectedVisit.recommendations}</p>
+                      </div>
+                    )}
                   </div>
-                )}
-                {selectedVisit.recommendations && (
-                  <div className="col-span-2">
-                    <Label className="text-muted-foreground">Recommendations</Label>
-                    <p className="font-medium whitespace-pre-line">{selectedVisit.recommendations}</p>
+                </div>
+
+                {/* Vehicle History - Only show if vehicle is associated */}
+                {vehicle && (
+                  <div>
+                    <h3 className="font-semibold mb-4">Vehicle Service History - {vehicle.vehicleNumber}</h3>
+                    <Tabs defaultValue="services" className="w-full">
+                      <TabsList className="grid w-full grid-cols-5">
+                        <TabsTrigger value="services">
+                          <Wrench className="w-4 h-4 mr-2" />
+                          Services ({vehicleServiceHistory.length})
+                        </TabsTrigger>
+                        <TabsTrigger value="scheduled">
+                          <Calendar className="w-4 h-4 mr-2" />
+                          Scheduled ({vehicleScheduledServices.length})
+                        </TabsTrigger>
+                        <TabsTrigger value="jobcards">
+                          <ClipboardList className="w-4 h-4 mr-2" />
+                          Job Cards ({vehicleJobCards.length})
+                        </TabsTrigger>
+                        <TabsTrigger value="driver">
+                          <User className="w-4 h-4 mr-2" />
+                          Driver
+                        </TabsTrigger>
+                        <TabsTrigger value="summary">
+                          <Calendar className="w-4 h-4 mr-2" />
+                          Summary
+                        </TabsTrigger>
+                      </TabsList>
+
+                      {/* Service History */}
+                      <TabsContent value="services" className="space-y-4 mt-4">
+                        <div className="space-y-3">
+                          {vehicleServiceHistory.length === 0 ? (
+                            <div className="text-center py-8 text-muted-foreground">
+                              <Wrench className="w-12 h-12 mx-auto mb-4 opacity-50" />
+                              <p>No service history found</p>
+                            </div>
+                          ) : (
+                            vehicleServiceHistory.map((service, index) => {
+                              const driverAtService = getDriverAtServiceTime(service.vehicleId, service.serviceDate);
+                              const previousService = index > 0 ? vehicleServiceHistory[index - 1] : undefined;
+                              const timeBetween = getTimeBetweenServices(service.serviceDate, previousService?.serviceDate);
+                              const partsTotal = service.partsUsed.reduce((sum, p) => sum + (p.lineTotal || 0), 0);
+                              const laborCost = service.cost - partsTotal;
+                              
+                              return (
+                                <div key={service.id} className="border border-border rounded-lg p-4">
+                                  <div className="flex items-start justify-between mb-2">
+                                    <div>
+                                      <p className="font-semibold">{service.serviceType}</p>
+                                      <p className="text-sm text-muted-foreground">
+                                        {format(new Date(service.serviceDate), 'MMM dd, yyyy')}
+                                        {timeBetween && (
+                                          <span className="ml-2 text-primary">• {timeBetween} since last</span>
+                                        )}
+                                      </p>
+                                    </div>
+                                    <p className="font-semibold text-primary">
+                                      SAR {service.cost.toLocaleString()}
+                                    </p>
+                                  </div>
+                                  <div className="mt-2">
+                                    <p className="text-sm text-muted-foreground mb-1">Work Done:</p>
+                                    <p className="text-sm font-medium">{service.workDone}</p>
+                                  </div>
+                                  {driverAtService && (
+                                    <div className="mt-2 text-sm">
+                                      <span className="text-muted-foreground">Driver at Service: </span>
+                                      <span className="font-medium">{driverAtService.name} ({driverAtService.phone})</span>
+                                    </div>
+                                  )}
+                                  {service.partsUsed.length > 0 && (
+                                    <div className="mt-3">
+                                      <p className="text-sm text-muted-foreground mb-2">Parts Used (Total: SAR {partsTotal.toLocaleString()}):</p>
+                                      <div className="space-y-1">
+                                        {service.partsUsed.map((part, idx) => (
+                                          <div key={idx} className="flex justify-between text-sm bg-muted/50 rounded p-2">
+                                            <span>{part.itemName} (Qty: {part.quantity} @ SAR {part.unitPrice?.toLocaleString() || '0'}/unit)</span>
+                                            <span className="font-medium">SAR {part.lineTotal.toLocaleString()}</span>
+                                          </div>
+                                        ))}
+                                      </div>
+                                    </div>
+                                  )}
+                                  {laborCost > 0 && (
+                                    <div className="mt-2 text-sm">
+                                      <span className="text-muted-foreground">Labor Cost: </span>
+                                      <span className="font-medium">SAR {laborCost.toLocaleString()}</span>
+                                    </div>
+                                  )}
+                                  {service.jobCardId && (
+                                    <div className="mt-2 text-sm">
+                                      <span className="text-muted-foreground">Job Card: </span>
+                                      <span className="font-medium">{service.jobCardId}</span>
+                                    </div>
+                                  )}
+                                </div>
+                              );
+                            })
+                          )}
+                        </div>
+                      </TabsContent>
+
+                      {/* Scheduled Services */}
+                      <TabsContent value="scheduled" className="space-y-4 mt-4">
+                        <div className="space-y-3">
+                          {vehicleScheduledServices.length === 0 ? (
+                            <div className="text-center py-8 text-muted-foreground">
+                              <Calendar className="w-12 h-12 mx-auto mb-4 opacity-50" />
+                              <p>No scheduled services found</p>
+                            </div>
+                          ) : (
+                            vehicleScheduledServices.map((scheduled) => (
+                              <div key={scheduled.id} className="border border-border rounded-lg p-4">
+                                <div className="flex items-start justify-between mb-2">
+                                  <div>
+                                    <p className="font-semibold">{scheduled.serviceType}</p>
+                                    <p className="text-sm text-muted-foreground">
+                                      Trigger: {scheduled.triggerType}
+                                      {scheduled.triggerType === 'KM' && typeof scheduled.triggerValue === 'number' && (
+                                        ` • Every ${scheduled.triggerValue.toLocaleString()} KM`
+                                      )}
+                                      {scheduled.triggerType === 'Hours' && typeof scheduled.triggerValue === 'number' && (
+                                        ` • Every ${scheduled.triggerValue} Hours`
+                                      )}
+                                    </p>
+                                  </div>
+                                  <StatusBadge 
+                                    status={scheduled.status} 
+                                    variant={
+                                      scheduled.status === 'Due' ? 'danger' :
+                                      scheduled.status === 'Upcoming' ? 'warning' : 'success'
+                                    }
+                                  />
+                                </div>
+                                <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mt-3 text-sm">
+                                  {scheduled.lastServiceDate && (
+                                    <div>
+                                      <span className="text-muted-foreground">Last Service:</span>
+                                      <p className="font-medium">
+                                        {format(new Date(scheduled.lastServiceDate), 'MMM dd, yyyy')}
+                                      </p>
+                                    </div>
+                                  )}
+                                  {scheduled.lastServiceKM && (
+                                    <div>
+                                      <span className="text-muted-foreground">Last Service KM:</span>
+                                      <p className="font-medium">{scheduled.lastServiceKM.toLocaleString()}</p>
+                                    </div>
+                                  )}
+                                  {scheduled.nextDueKM && (
+                                    <div>
+                                      <span className="text-muted-foreground">Next Due KM:</span>
+                                      <p className="font-medium">{scheduled.nextDueKM.toLocaleString()}</p>
+                                    </div>
+                                  )}
+                                  {scheduled.nextDueDate && (
+                                    <div>
+                                      <span className="text-muted-foreground">Next Due Date:</span>
+                                      <p className="font-medium">
+                                        {format(new Date(scheduled.nextDueDate), 'MMM dd, yyyy')}
+                                      </p>
+                                    </div>
+                                  )}
+                                </div>
+                                {scheduled.status === 'Due' && (
+                                  <div className="mt-3 bg-destructive/10 border border-destructive/20 rounded-lg p-2">
+                                    <p className="text-sm text-destructive font-medium">
+                                      <AlertCircle className="w-4 h-4 inline mr-1" />
+                                      This service is due and requires immediate attention
+                                    </p>
+                                  </div>
+                                )}
+                              </div>
+                            ))
+                          )}
+                        </div>
+                      </TabsContent>
+
+                      {/* Job Cards */}
+                      <TabsContent value="jobcards" className="space-y-4 mt-4">
+                        <div className="space-y-3">
+                          {vehicleJobCards.length === 0 ? (
+                            <div className="text-center py-8 text-muted-foreground">
+                              <ClipboardList className="w-12 h-12 mx-auto mb-4 opacity-50" />
+                              <p>No job cards found</p>
+                            </div>
+                          ) : (
+                            vehicleJobCards.map((jobCard) => (
+                              <div key={jobCard.id} className="border border-border rounded-lg p-4">
+                                <div className="flex items-start justify-between mb-2">
+                                  <div>
+                                    <p className="font-semibold">{jobCard.id}</p>
+                                    <p className="text-sm text-muted-foreground">
+                                      {format(new Date(jobCard.jobDate), 'MMM dd, yyyy')} • {jobCard.startTime} - {jobCard.endTime}
+                                    </p>
+                                  </div>
+                                  <StatusBadge status={jobCard.status} />
+                                </div>
+                                <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mt-3 text-sm">
+                                  <div>
+                                    <span className="text-muted-foreground">KM:</span>
+                                    <p className="font-medium">{jobCard.totalKM.toLocaleString()}</p>
+                                  </div>
+                                  <div>
+                                    <span className="text-muted-foreground">Hours:</span>
+                                    <p className="font-medium">{jobCard.totalHours.toLocaleString()}</p>
+                                  </div>
+                                  <div>
+                                    <span className="text-muted-foreground">Cost:</span>
+                                    <p className="font-medium">SAR {jobCard.totalCost.toLocaleString()}</p>
+                                  </div>
+                                  <div>
+                                    <span className="text-muted-foreground">Created:</span>
+                                    <p className="font-medium">
+                                      {format(new Date(jobCard.createdAt), 'MMM dd, yyyy HH:mm')}
+                                    </p>
+                                  </div>
+                                </div>
+                                {jobCard.servicesDone.length > 0 && (
+                                  <div className="mt-2">
+                                    <span className="text-sm text-muted-foreground">Services: </span>
+                                    <span className="text-sm font-medium">
+                                      {jobCard.servicesDone.join(', ')}
+                                    </span>
+                                  </div>
+                                )}
+                                {jobCard.remarks && (
+                                  <div className="mt-2">
+                                    <span className="text-sm text-muted-foreground">Remarks: </span>
+                                    <p className="text-sm font-medium mt-1">{jobCard.remarks}</p>
+                                  </div>
+                                )}
+                              </div>
+                            ))
+                          )}
+                        </div>
+                      </TabsContent>
+
+                      {/* Driver History */}
+                      <TabsContent value="driver" className="space-y-4 mt-4">
+                        <div className="bg-muted/50 rounded-lg p-4">
+                          <h4 className="font-semibold mb-3">Current Driver</h4>
+                          {currentDriver ? (
+                            <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
+                              <div>
+                                <span className="text-muted-foreground">Name:</span>
+                                <p className="font-medium">{currentDriver.name}</p>
+                              </div>
+                              <div>
+                                <span className="text-muted-foreground">Phone:</span>
+                                <p className="font-medium">{currentDriver.phone}</p>
+                              </div>
+                              <div>
+                                <span className="text-muted-foreground">License:</span>
+                                <p className="font-medium">{currentDriver.licenseNumber}</p>
+                              </div>
+                              <div>
+                                <span className="text-muted-foreground">Branch:</span>
+                                <p className="font-medium">{currentDriver.branch}</p>
+                              </div>
+                            </div>
+                          ) : (
+                            <p className="text-muted-foreground">No driver currently assigned</p>
+                          )}
+                        </div>
+                        <div>
+                          <h4 className="font-semibold mb-3">Driver Assignment History</h4>
+                          <div className="space-y-3">
+                            {vehicleDriverHistory.length === 0 ? (
+                              <div className="text-center py-8 text-muted-foreground">
+                                <User className="w-12 h-12 mx-auto mb-4 opacity-50" />
+                                <p>No driver assignment history found</p>
+                              </div>
+                            ) : (
+                              vehicleDriverHistory.map((assignment) => {
+                                const driver = drivers?.find(d => d.id === assignment.driverId);
+                                return (
+                                  <div key={assignment.id} className="border border-border rounded-lg p-4">
+                                    <div className="flex items-start justify-between mb-2">
+                                      <div>
+                                        <p className="font-semibold">{driver?.name || 'Unknown Driver'}</p>
+                                        <p className="text-sm text-muted-foreground">
+                                          {driver?.licenseNumber || 'N/A'}
+                                        </p>
+                                      </div>
+                                      {!assignment.unassignedAt && (
+                                        <StatusBadge status="Active" variant="success" />
+                                      )}
+                                    </div>
+                                    <div className="grid grid-cols-2 gap-4 mt-3 text-sm">
+                                      <div>
+                                        <span className="text-muted-foreground">Assigned:</span>
+                                        <p className="font-medium">
+                                          {format(new Date(assignment.assignedAt), 'MMM dd, yyyy HH:mm')}
+                                        </p>
+                                      </div>
+                                      {assignment.unassignedAt ? (
+                                        <div>
+                                          <span className="text-muted-foreground">Unassigned:</span>
+                                          <p className="font-medium">
+                                            {format(new Date(assignment.unassignedAt), 'MMM dd, yyyy HH:mm')}
+                                          </p>
+                                        </div>
+                                      ) : (
+                                        <div>
+                                          <span className="text-muted-foreground">Status:</span>
+                                          <p className="font-medium text-success">Currently Assigned</p>
+                                        </div>
+                                      )}
+                                      {assignment.assignedBy && (
+                                        <div>
+                                          <span className="text-muted-foreground">Assigned By:</span>
+                                          <p className="font-medium">{assignment.assignedBy}</p>
+                                        </div>
+                                      )}
+                                      {assignment.reason && (
+                                        <div>
+                                          <span className="text-muted-foreground">Reason:</span>
+                                          <p className="font-medium">{assignment.reason}</p>
+                                        </div>
+                                      )}
+                                    </div>
+                                  </div>
+                                );
+                              })
+                            )}
+                          </div>
+                        </div>
+                      </TabsContent>
+
+                      {/* Summary */}
+                      <TabsContent value="summary" className="space-y-4 mt-4">
+                        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                          <div className="bg-card border border-border rounded-lg p-4">
+                            <p className="text-sm text-muted-foreground">Total Services</p>
+                            <p className="text-2xl font-bold">{vehicleServiceHistory.length}</p>
+                          </div>
+                          <div className="bg-card border border-border rounded-lg p-4">
+                            <p className="text-sm text-muted-foreground">Scheduled Services</p>
+                            <p className="text-2xl font-bold">{vehicleScheduledServices.length}</p>
+                            <p className="text-xs text-muted-foreground mt-1">
+                              {vehicleScheduledServices.filter(s => s.status === 'Due').length} Due
+                            </p>
+                          </div>
+                          <div className="bg-card border border-border rounded-lg p-4">
+                            <p className="text-sm text-muted-foreground">Total Job Cards</p>
+                            <p className="text-2xl font-bold">{vehicleJobCards.length}</p>
+                          </div>
+                          <div className="bg-card border border-border rounded-lg p-4">
+                            <p className="text-sm text-muted-foreground">Total Service Cost</p>
+                            <p className="text-2xl font-bold">
+                              SAR {vehicleServiceHistory.reduce((sum, s) => sum + s.cost, 0).toLocaleString()}
+                            </p>
+                          </div>
+                        </div>
+                        <div className="bg-muted/50 rounded-lg p-4">
+                          <h4 className="font-semibold mb-2">Vehicle Details</h4>
+                          <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
+                            <div>
+                              <span className="text-muted-foreground">Vehicle:</span>
+                              <p className="font-medium">{vehicle.vehicleNumber}</p>
+                            </div>
+                            <div>
+                              <span className="text-muted-foreground">Model:</span>
+                              <p className="font-medium">{vehicle.model}</p>
+                            </div>
+                            <div>
+                              <span className="text-muted-foreground">Current KM:</span>
+                              <p className="font-medium">{vehicle.currentKM.toLocaleString()}</p>
+                            </div>
+                            <div>
+                              <span className="text-muted-foreground">Total Hours:</span>
+                              <p className="font-medium">{vehicle.totalHours.toLocaleString()}</p>
+                            </div>
+                          </div>
+                        </div>
+                        {currentDriver && (
+                          <div className="bg-muted/50 rounded-lg p-4">
+                            <h4 className="font-semibold mb-2">Current Driver Details</h4>
+                            <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
+                              <div>
+                                <span className="text-muted-foreground">Name:</span>
+                                <p className="font-medium">{currentDriver.name}</p>
+                              </div>
+                              <div>
+                                <span className="text-muted-foreground">Phone:</span>
+                                <p className="font-medium">{currentDriver.phone}</p>
+                              </div>
+                              <div>
+                                <span className="text-muted-foreground">License:</span>
+                                <p className="font-medium">{currentDriver.licenseNumber}</p>
+                              </div>
+                              <div>
+                                <span className="text-muted-foreground">Branch:</span>
+                                <p className="font-medium">{currentDriver.branch}</p>
+                              </div>
+                            </div>
+                          </div>
+                        )}
+                      </TabsContent>
+                    </Tabs>
                   </div>
                 )}
               </div>
-            </div>
-          )}
+            );
+          })()}
         </DialogContent>
       </Dialog>
     </div>
